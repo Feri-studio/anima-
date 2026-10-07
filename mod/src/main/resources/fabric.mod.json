@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "anima-villagers",
+  "version": "${version}",
+  "name": "Anima Villagers",
+  "description": "AI villagers with soul, memory, and social dynamics",
+  "authors": ["Feri-studio"],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.anima.villagers.AnimaVillagers"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "fabric-api": "*",
+    "minecraft": "~1.20.1",
+    "java": ">=17"
+  }
+}
