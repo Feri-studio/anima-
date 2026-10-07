@@ -12,46 +12,56 @@ public class BuildingPlanner {
 
     private BuildingPlanner() {}
 
-    /**
-     * Раз в день: продолжаем стройки, начинаем новые.
-     * Получает мир, чтобы реально ставить блоки.
-     */
-    public void dailyPlan(ServerWorld world, BlockPos villageCenter,
-                          int availableResources, Collection<VillagerCharacter> villagers) {
-        // Продолжаем старые стройки — просто ускоряем прогресс
+    public void dailyPlan(ServerWorld world, BlockPos center,
+                          int resources, Collection<VillagerCharacter> villagers) {
+        // Прогресс
         for (Map.Entry<String, Integer> e : new ArrayList<>(inProgress.entrySet())) {
-            int progress = e.getValue() + 25 + villagers.size() * 2;
-            if (progress >= 100) {
-                finishBuild(world, villageCenter, e.getKey());
+            int p = e.getValue() + 25 + villagers.size() * 2;
+            if (p >= 100) {
+                finish(world, center, e.getKey(), villagers);
                 inProgress.remove(e.getKey());
-            } else {
-                e.setValue(progress);
-            }
+            } else e.setValue(p);
         }
 
-        // Начинаем новую
         if (inProgress.size() < 2) {
-            String next = pickNext(availableResources);
+            String next = pickNext(resources);
             if (next != null) {
                 inProgress.put(next, 0);
-                AnimaVillagers.LOGGER.info("[План] Начинаем стройку: {}", next);
+                AnimaVillagers.LOGGER.info("[План] Начинаем: {}", next);
             }
         }
     }
 
-    private void finishBuild(ServerWorld world, BlockPos center, String name) {
-        // Строим рядом с центром, со сдвигом
-        BlockPos target = center.add(
-            RNG.nextInt(40) - 20, 0, RNG.nextInt(40) - 20);
+    private void finish(ServerWorld world, BlockPos center, String name,
+                         Collection<VillagerCharacter> villagers) {
+        BlockPos target = center.add(RNG.nextInt(60) - 30, 0, RNG.nextInt(60) - 30);
 
-        switch (name) {
-            case "хижина" -> StructureBuilder.buildHut(world, target);
-            case "ферма" -> StructureBuilder.buildFarm(world, target);
-            case "храм" -> StructureBuilder.buildTemple(world, target);
-            case "замок" -> StructureBuilder.buildCastle(world, target);
-            default -> AnimaVillagers.LOGGER.info("[План] {} — без реальной стройки", name);
+        // Подбираем "заказчика" — жителя нужной профессии
+        String profession = guessProfession(name);
+        String description = String.format(
+            "здание для %s в стиле %s, %s", profession,
+            VillageProgress.INSTANCE.getCurrentEra().displayName, name);
+
+        // LLM проектирует
+        StructureGenerator.GeneratedStructure s = StructureGenerator.request(description);
+        if (s != null) {
+            StructureBuilder.buildFromLlm(world, target, s);
+        } else {
+            AnimaVillagers.LOGGER.warn("[План] LLM не дал чертёж для {}", name);
         }
         VillageProgress.INSTANCE.structureBuilt(name);
+    }
+
+    private String guessProfession(String building) {
+        return switch (building) {
+            case "кузница" -> "кузнец";
+            case "храм" -> "жрец";
+            case "рынок" -> "торговец";
+            case "казарма" -> "стражник";
+            case "замок" -> "король";
+            case "собор", "академия" -> "учёный";
+            default -> "строитель";
+        };
     }
 
     private String pickNext(int resources) {
@@ -59,13 +69,6 @@ public class BuildingPlanner {
             .filter(bp -> !inProgress.containsKey(bp.name))
             .filter(bp -> bp.era.ordinal() <= VillageProgress.INSTANCE.getCurrentEra().ordinal())
             .filter(bp -> bp.canBuild(resources))
-            .sorted((a, b) -> {
-                Map<String, Integer> prio = Map.of(
-                    "хижина", 10, "ферма", 9, "храм", 7, "стена", 5, "замок", 3);
-                return Integer.compare(
-                    prio.getOrDefault(b.name, 1),
-                    prio.getOrDefault(a.name, 1));
-            })
             .map(bp -> bp.name)
             .findFirst().orElse(null);
     }

@@ -22,6 +22,7 @@ public class AnimaVillagers implements ModInitializer {
         LOGGER.info("Anima Villagers — души пробуждаются");
         AnimaConfig.load();
         ProfessionDatabase.load();
+        SelfImprovement.INSTANCE.load();
 
         // Стартовые жители
         for (int i = 0; i < 5; i++) {
@@ -36,13 +37,11 @@ public class AnimaVillagers implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             if (!started && server.getTicks() > 200) {
                 started = true;
-                // Генерируем профессии до 2000 и заповеди религии
                 new Thread(() -> {
                     ProfessionGenerator.fillTo2000();
                     Religion.INSTANCE.generateCommandments();
-                }, "Anima-LLM-Bootstrap").start();
+                }, "Anima-Bootstrap").start();
             }
-
             ticksSinceLastDay++;
             if (ticksSinceLastDay >= TICKS_PER_DAY) {
                 ticksSinceLastDay = 0;
@@ -50,11 +49,12 @@ public class AnimaVillagers implements ModInitializer {
             }
         });
 
-        LOGGER.info("Хранитель проснулся. {} душ, эпоха: {}, бог: {}, профессий доступно: {}",
+        LOGGER.info("Хранитель проснулся. {} душ, эпоха: {}, бог: {}, профессий: {}, изобретений: {}",
             TheKeeper.INSTANCE.getPopulation(),
             VillageProgress.INSTANCE.getCurrentEra().displayName,
             God.INSTANCE.currentName(),
-            ProfessionDatabase.size());
+            ProfessionDatabase.size(),
+            SelfImprovement.INSTANCE.getCount());
     }
 
     private void onNewDay(ServerWorld world) {
@@ -70,7 +70,6 @@ public class AnimaVillagers implements ModInitializer {
             TheKeeper.INSTANCE.getPopulation(), avgInt,
             TheKeeper.INSTANCE.getResources());
 
-        // Стройка — в спавне мира
         BlockPos center = world.getSpawnPos();
         BuildingPlanner.INSTANCE.dailyPlan(
             world, center,
@@ -87,5 +86,14 @@ public class AnimaVillagers implements ModInitializer {
             VillageProgress.INSTANCE.getEraProgressDays(),
             TheKeeper.INSTANCE.getVillagers(),
             God.INSTANCE.getFaith());
+
+        Monarchy.INSTANCE.dailyTick(
+            VillageProgress.INSTANCE.getEraProgressDays(),
+            TheKeeper.INSTANCE.getVillagers());
+
+        SelfImprovement.INSTANCE.dailyTick(
+            VillageProgress.INSTANCE.getEraProgressDays(),
+            TheKeeper.INSTANCE.getPopulation(),
+            VillageProgress.INSTANCE.getCurrentEra());
     }
 }
