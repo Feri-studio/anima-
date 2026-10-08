@@ -3,7 +3,6 @@ package com.anima.villagers;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.BlockPos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,23 +16,41 @@ public class AnimaVillagers implements ModInitializer {
     private static final int TICKS_PER_DAY = 24000;
     private boolean started = false;
 
+    // Держим активности отдельно
+    private static final java.util.Map<UUID, VillagerActivity> ACTIVITIES = new java.util.HashMap<>();
+
     @Override
     public void onInitialize() {
         LOGGER.info("Anima Villagers — души пробуждаются");
         AnimaConfig.load();
         ProfessionDatabase.load();
         SelfImprovement.INSTANCE.load();
+        SettlementManager.INSTANCE.init();
 
-        // Стартовые жители
-        for (int i = 0; i < 5; i++) {
-            VillagerCharacter v = CharacterGenerator.generate();
-            UUID uuid = UUID.randomUUID();
-            v.entityUuid = uuid;
-            v.profession = ProfessionGenerator.randomProfession();
-            TheKeeper.INSTANCE.observeVillager(uuid, v);
-            LOGGER.info("[Житель] {} ({}, {} лет) — {}",
-                v.name, v.profession, v.age, v.emotions.getEmoji());
+        // Создаём 300 жителей (по 100 на поселение)
+        Settlement[] list = SettlementManager.INSTANCE.getSettlements().toArray(new Settlement[0]);
+        for (int s = 0; s < list.length; s++) {
+            Settlement settlement = list[s];
+            for (int i = 0; i < 100; i++) {
+                VillagerCharacter v = CharacterGenerator.generate();
+                UUID uuid = UUID.randomUUID();
+                v.entityUuid = uuid;
+                v.profession = ProfessionGenerator.randomProfession();
+
+                // Ставим координаты около центра поселения
+                v.x = settlement.centerX + (Math.random() - 0.5) * 80;
+                v.z = settlement.centerZ + (Math.random() - 0.5) * 80;
+                v.y = 65;
+
+                settlement.addCitizen(uuid);
+                TheKeeper.INSTANCE.observeVillager(uuid, v);
+                ACTIVITIES.put(uuid, new VillagerActivity());
+            }
+            LOGGER.info("{}: 100 жителей создано", settlement.name);
         }
+
+        // Выборы лидеров сразу
+        SettlementManager.INSTANCE.dailyTick(TheKeeper.INSTANCE.getVillagers());
 
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             if (!started && server.getTicks() > 200) {
@@ -50,58 +67,43 @@ public class AnimaVillagers implements ModInitializer {
             }
         });
 
-        LOGGER.info("Хранитель проснулся. {} душ, эпоха: {}, бог: {}, изобретений: {}",
+        LOGGER.info("Хранитель проснулся. {} душ в {} поселениях",
             TheKeeper.INSTANCE.getPopulation(),
-            VillageProgress.INSTANCE.getCurrentEra().displayName,
-            God.INSTANCE.currentName(),
-            SelfImprovement.INSTANCE.getCount());
+            SettlementManager.INSTANCE.getSettlements().size());
     }
 
     private void onNewDay(ServerWorld world) {
         TheKeeper.INSTANCE.tick();
 
-        float avgInt = 0f; int count = 0;
-        for (VillagerCharacter v : TheKeeper.INSTANCE.getVillagers()) {
-            avgInt += v.getTrait("ум"); count++;
-        }
-        if (count > 0) avgInt /= count;
-
         int day = VillageProgress.INSTANCE.getEraProgressDays();
 
-        VillageProgress.INSTANCE.dailyTick(
-            TheKeeper.INSTANCE.getPopulation(), avgInt,
-            TheKeeper.INSTANCE.getResources());
+        // Поселения
+        SettlementManager.INSTANCE.dailyTick(TheKeeper.INSTANCE.getVillagers());
 
-        BuildingPlanner.INSTANCE.dailyPlan(
-            world, world.getSpawnPos(),
-            TheKeeper.INSTANCE.getResources(),
-            TheKeeper.INSTANCE.getVillagers());
+        // Каждый житель: разум, эмоции, занятие
+        for (VillagerCharacter v : TheKeeper.INSTANCE.getVillagers()) {
+            Settlement s = SettlementManager.INSTANCE.getSettlementOf(v.entityUuid);
+            VillagerActivity act = ACTIVITIES.computeIfAbsent(v.entityUuid,
+                k -> new VillagerActivity());
+
+            v.mind.dailyTick(v, day, VillageProgress.INSTANCE);
+            v.emotions.dailyTick(v);
+            act.dailyTick(v, s);
+
+            // Показываем эмоцию и предмет
+            EmotionDisplay.show(world, v);
+            VillagerEquipment.showHeldItem(world, v, act);
+        }
+
+        // Глобальные системы
+        VillageProgress.INSTANCE.dailyTick(
+            TheKeeper.INSTANCE.getPopulation(), 0.5f,
+            TheKeeper.INSTANCE.getResources());
 
         God.INSTANCE.dailyTick(day,
             TheKeeper.INSTANCE.getPopulation(),
             TheKeeper.INSTANCE.getMood(),
             TheKeeper.INSTANCE.getCrisisType());
-
-        Religion.INSTANCE.dailyTick(day,
-            TheKeeper.INSTANCE.getVillagers(),
-            God.INSTANCE.getFaith());
-
-        Monarchy.INSTANCE.dailyTick(day, TheKeeper.INSTANCE.getVillagers());
-
-        // Разум и эмоции каждого жителя
-        for (VillagerCharacter v : TheKeeper.INSTANCE.getVillagers()) {
-            v.mind.dailyTick(v, day, VillageProgress.INSTANCE);
-            v.emotions.dailyTick(v);
-
-            // Случайная эмоция раз в несколько дней
-            if (Math.random() < 0.2) {
-                String[] events = {"подарок", "удар", "победа", "еда", "новая идея"};
-                v.emotions.react(v, events[(int)(Math.random() * events.length)]);
-            }
-
-            // Показываем эмоцию игрокам в мире
-            EmotionDisplay.show(world, v);
-        }
 
         SelfImprovement.INSTANCE.dailyTick(day,
             TheKeeper.INSTANCE.getPopulation(),
