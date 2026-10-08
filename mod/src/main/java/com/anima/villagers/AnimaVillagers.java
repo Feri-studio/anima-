@@ -31,7 +31,8 @@ public class AnimaVillagers implements ModInitializer {
             v.entityUuid = uuid;
             v.profession = ProfessionGenerator.randomProfession();
             TheKeeper.INSTANCE.observeVillager(uuid, v);
-            LOGGER.info("[Житель] {} ({}, {} лет)", v.name, v.profession, v.age);
+            LOGGER.info("[Житель] {} ({}, {} лет) — {}",
+                v.name, v.profession, v.age, v.emotions.getEmoji());
         }
 
         ServerTickEvents.END_SERVER_TICK.register(server -> {
@@ -49,11 +50,10 @@ public class AnimaVillagers implements ModInitializer {
             }
         });
 
-        LOGGER.info("Хранитель проснулся. {} душ, эпоха: {}, бог: {}, профессий: {}, изобретений: {}",
+        LOGGER.info("Хранитель проснулся. {} душ, эпоха: {}, бог: {}, изобретений: {}",
             TheKeeper.INSTANCE.getPopulation(),
             VillageProgress.INSTANCE.getCurrentEra().displayName,
             God.INSTANCE.currentName(),
-            ProfessionDatabase.size(),
             SelfImprovement.INSTANCE.getCount());
     }
 
@@ -66,33 +66,44 @@ public class AnimaVillagers implements ModInitializer {
         }
         if (count > 0) avgInt /= count;
 
+        int day = VillageProgress.INSTANCE.getEraProgressDays();
+
         VillageProgress.INSTANCE.dailyTick(
             TheKeeper.INSTANCE.getPopulation(), avgInt,
             TheKeeper.INSTANCE.getResources());
 
-        BlockPos center = world.getSpawnPos();
         BuildingPlanner.INSTANCE.dailyPlan(
-            world, center,
+            world, world.getSpawnPos(),
             TheKeeper.INSTANCE.getResources(),
             TheKeeper.INSTANCE.getVillagers());
 
-        God.INSTANCE.dailyTick(
-            VillageProgress.INSTANCE.getEraProgressDays(),
+        God.INSTANCE.dailyTick(day,
             TheKeeper.INSTANCE.getPopulation(),
             TheKeeper.INSTANCE.getMood(),
             TheKeeper.INSTANCE.getCrisisType());
 
-        Religion.INSTANCE.dailyTick(
-            VillageProgress.INSTANCE.getEraProgressDays(),
+        Religion.INSTANCE.dailyTick(day,
             TheKeeper.INSTANCE.getVillagers(),
             God.INSTANCE.getFaith());
 
-        Monarchy.INSTANCE.dailyTick(
-            VillageProgress.INSTANCE.getEraProgressDays(),
-            TheKeeper.INSTANCE.getVillagers());
+        Monarchy.INSTANCE.dailyTick(day, TheKeeper.INSTANCE.getVillagers());
 
-        SelfImprovement.INSTANCE.dailyTick(
-            VillageProgress.INSTANCE.getEraProgressDays(),
+        // Разум и эмоции каждого жителя
+        for (VillagerCharacter v : TheKeeper.INSTANCE.getVillagers()) {
+            v.mind.dailyTick(v, day, VillageProgress.INSTANCE);
+            v.emotions.dailyTick(v);
+
+            // Случайная эмоция раз в несколько дней
+            if (Math.random() < 0.2) {
+                String[] events = {"подарок", "удар", "победа", "еда", "новая идея"};
+                v.emotions.react(v, events[(int)(Math.random() * events.length)]);
+            }
+
+            // Показываем эмоцию игрокам в мире
+            EmotionDisplay.show(world, v);
+        }
+
+        SelfImprovement.INSTANCE.dailyTick(day,
             TheKeeper.INSTANCE.getPopulation(),
             VillageProgress.INSTANCE.getCurrentEra());
     }

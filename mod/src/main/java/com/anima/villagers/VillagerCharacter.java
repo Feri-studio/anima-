@@ -12,7 +12,9 @@ public class VillagerCharacter {
     public List<String> dreams = new ArrayList<>();
     public String mood = "нейтральный";
     public UUID entityUuid;
-    public double x, y, z;   // позиция в мире
+    public double x, y, z;
+    public VillagerMind mind = new VillagerMind();
+    public VillagerEmotions emotions = new VillagerEmotions();
 
     public VillagerCharacter(String name, int age, String profession) {
         this.name = name;
